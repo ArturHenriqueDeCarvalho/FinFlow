@@ -1,0 +1,7 @@
+{
+  "name": "FinPulse — Gestão Financeira Inteligente & Open Finance",
+  "description": "Plataforma moderna de gestão financeira pessoal com integração Open Finance BR, leitura inteligente de extratos (OFX, CSV, PDF), categorização por IA e monitoramento preventivo de gastos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
