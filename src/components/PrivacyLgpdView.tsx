@@ -15,7 +15,6 @@ import {
 export const PrivacyLgpdView: React.FC = () => {
   const {
     exportLgpdData,
-    resetToDefaults,
     deleteAllUserData,
     consents,
     accounts,
@@ -31,16 +30,10 @@ export const PrivacyLgpdView: React.FC = () => {
     setTimeout(() => setSuccessMsg(''), 4000);
   };
 
-  const handleReset = () => {
-    resetToDefaults();
-    setSuccessMsg('Base restaurada para os dados de demonstração originais.');
-    setTimeout(() => setSuccessMsg(''), 4000);
-  };
-
   const handleDeleteAll = () => {
     deleteAllUserData();
     setConfirmDelete(false);
-    setSuccessMsg('Todos os dados foram permanentemente expurgados do navegador.');
+    setSuccessMsg('Todos os dados foram permanentemente expurgados da sua conta.');
     setTimeout(() => setSuccessMsg(''), 4000);
   };
 
@@ -123,23 +116,6 @@ export const PrivacyLgpdView: React.FC = () => {
             >
               <Download className="w-3.5 h-3.5" />
               <span>Exportar Dados (JSON)</span>
-            </button>
-          </div>
-
-          {/* Restaurar Base de Teste */}
-          <div className="py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div>
-              <h4 className="font-bold text-white">Restaurar Dados Amostrais do Sandbox</h4>
-              <p className="text-slate-400 text-[11px] mt-0.5">
-                Restaura as contas e transações de demonstração do Nubank, Itaú e Inter com o histórico de teste.
-              </p>
-            </div>
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer shrink-0"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Restaurar Padrão</span>
             </button>
           </div>
 

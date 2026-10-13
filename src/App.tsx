@@ -1,4 +1,5 @@
 import React from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { FinanceProvider, useFinance } from './context/FinanceContext';
 import { Navbar } from './components/Navbar';
 import { MobileBottomNav } from './components/MobileBottomNav';
@@ -9,7 +10,8 @@ import { TransactionsView } from './components/TransactionsView';
 import { BudgetsView } from './components/BudgetsView';
 import { AiInsightsView } from './components/AiInsightsView';
 import { PrivacyLgpdView } from './components/PrivacyLgpdView';
-import { ShieldCheck } from 'lucide-react';
+import { LoginView } from './components/LoginView';
+import { ShieldCheck, Loader2 } from 'lucide-react';
 
 const AppContent: React.FC = () => {
   const { activeTab } = useFinance();
@@ -53,10 +55,35 @@ const AppContent: React.FC = () => {
   );
 };
 
-export default function App() {
+const MainLayout: React.FC = () => {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#0B0F19] flex flex-col items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+          <span className="text-xs text-slate-400 font-medium">Carregando autenticação segura...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginView />;
+  }
+
   return (
     <FinanceProvider>
       <AppContent />
     </FinanceProvider>
+  );
+};
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <MainLayout />
+    </AuthProvider>
   );
 }

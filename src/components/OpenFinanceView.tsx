@@ -22,7 +22,6 @@ export const OpenFinanceView: React.FC = () => {
     syncAccount,
     connectInstitution,
     revokeConsent,
-    isDemoMode,
   } = useFinance();
 
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
@@ -112,8 +111,9 @@ export const OpenFinanceView: React.FC = () => {
           <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
             Suas Instituições Conectadas ({accounts.length})
           </h3>
-          <span className="text-xs text-slate-400">
-            {isDemoMode ? 'Ambiente Sandbox Oficial Demonstrativo' : 'Produção'}
+          <span className="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Open Finance Brasil · Conexão Ativa</span>
           </span>
         </div>
 

@@ -1,0 +1,6 @@
+{
+  "summary": "Plano de implementação detalhado para autenticação Google via Firebase Auth, banco Firestore com isolamento por usuário, transição para conta limpa com dados 100% reais e integração Open Finance gratuita via Pluggy Sandbox e extratos OFX/CSV.",
+  "updatedAt": "2026-10-13T19:01:57.476886654Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

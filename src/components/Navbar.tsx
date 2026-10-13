@@ -1,10 +1,12 @@
 import React from 'react';
 import { useFinance } from '../context/FinanceContext';
+import { useAuth } from '../context/AuthContext';
 import {
   RotateCw,
-  ShieldCheck,
   Bell,
   Sparkles,
+  LogOut,
+  User as UserIcon,
 } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
@@ -14,9 +16,9 @@ export const Navbar: React.FC = () => {
     isSyncingAll,
     syncAllAccounts,
     unreadAlertsCount,
-    isDemoMode,
-    setIsDemoMode,
   } = useFinance();
+
+  const { user, logOut } = useAuth();
 
   const navItems = [
     { id: 'dashboard', label: 'Visão Geral' },
@@ -47,14 +49,6 @@ export const Navbar: React.FC = () => {
               </span>
             </div>
           </button>
-
-          {/* Sandbox Indicator (LGPD & Regulatory Requirement) */}
-          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800/80 border border-slate-700/60 text-[11px] text-slate-300">
-            <span className="text-slate-400">Ambiente:</span>
-            <span className="font-medium text-emerald-400">
-              {isDemoMode ? 'Sandbox Open Finance' : 'Produção'}
-            </span>
-          </div>
         </div>
 
         {/* Zone 2: Navigation Links (Clean single-line text links) */}
@@ -77,7 +71,7 @@ export const Navbar: React.FC = () => {
           })}
         </nav>
 
-        {/* Zone 3: Primary Action & Quick Tools */}
+        {/* Zone 3: Primary Action & User Session */}
         <div className="flex items-center gap-2.5 shrink-0">
           {/* Alertas Badge Trigger */}
           <button
@@ -101,10 +95,34 @@ export const Navbar: React.FC = () => {
           >
             <RotateCw className={`w-3.5 h-3.5 ${isSyncingAll ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">
-              {isSyncingAll ? 'Sincronizando...' : 'Sincronizar Bancos'}
+              {isSyncingAll ? 'Sincronizando...' : 'Sincronizar'}
             </span>
-            <span className="sm:hidden">Sincronizar</span>
           </button>
+
+          {/* Perfil do Usuário e Logout */}
+          {user && (
+            <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+              {user.photoURL ? (
+                <img
+                  src={user.photoURL}
+                  alt={user.displayName || 'Usuário'}
+                  referrerPolicy="no-referrer"
+                  className="w-7 h-7 rounded-full border border-slate-700 object-cover"
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs text-slate-300 font-bold">
+                  {user.displayName ? user.displayName[0].toUpperCase() : <UserIcon className="w-3.5 h-3.5" />}
+                </div>
+              )}
+              <button
+                onClick={logOut}
+                title="Sair da Conta Google"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800/60 transition-colors cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
 
       </div>

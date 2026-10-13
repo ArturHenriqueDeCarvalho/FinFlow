@@ -176,61 +176,89 @@ export const DashboardView: React.FC = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
-          {accounts.map(acc => {
-            const isSyncing = acc.status === 'SYNCING';
-            const isCard = acc.type === 'CREDIT_CARD';
-
-            return (
-              <div
-                key={acc.id}
-                className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/60 flex flex-col justify-between"
+        {accounts.length === 0 ? (
+          <div className="p-6 rounded-xl bg-slate-800/30 border border-dashed border-slate-700 text-center flex flex-col items-center justify-center space-y-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-white">Nenhuma conta bancária conectada ainda</h4>
+              <p className="text-xs text-slate-400 max-w-md mt-0.5">
+                Sua conta está limpa e pronta para receber seus dados reais. Conecte sua primeira instituição via Open Finance ou importe um extrato bancário.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+              <button
+                onClick={() => setActiveTab('open-finance')}
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
               >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2 truncate">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: acc.institutionColor }}
-                    />
-                    <span className="text-xs font-semibold text-slate-200 truncate">
-                      {acc.institutionName}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => syncAccount(acc.id)}
-                    disabled={isSyncing}
-                    title="Sincronizar agora"
-                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    <RotateCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
-                  </button>
-                </div>
+                Conectar via Open Finance
+              </button>
+              <button
+                onClick={() => setActiveTab('statements')}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 cursor-pointer"
+              >
+                Importar Extrato OFX/CSV
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+            {accounts.map(acc => {
+              const isSyncing = acc.status === 'SYNCING';
+              const isCard = acc.type === 'CREDIT_CARD';
 
-                <div>
-                  <div className="text-[11px] text-slate-400 truncate mb-0.5">
-                    {acc.name} ({acc.accountNumberMasked})
-                  </div>
-                  <div className="text-sm font-bold text-white tabular-nums">
-                    {isCard ? (
-                      <span className="text-rose-400">
-                        R$ {Math.abs(acc.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              return (
+                <div
+                  key={acc.id}
+                  className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/60 flex flex-col justify-between"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 truncate">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: acc.institutionColor }}
+                      />
+                      <span className="text-xs font-semibold text-slate-200 truncate">
+                        {acc.institutionName}
                       </span>
-                    ) : (
-                      <span className="text-emerald-400">
-                        R$ {acc.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    )}
+                    </div>
+                    <button
+                      onClick={() => syncAccount(acc.id)}
+                      disabled={isSyncing}
+                      title="Sincronizar agora"
+                      className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <RotateCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                    </button>
                   </div>
-                </div>
 
-                <div className="mt-2 pt-2 border-t border-slate-700/40 flex items-center justify-between text-[10px] text-slate-400">
-                  <span>{isCard ? 'Fatura em aberto' : 'Saldo atual'}</span>
-                  <span className="text-emerald-400/90 font-medium">Sincronizado</span>
+                  <div>
+                    <div className="text-[11px] text-slate-400 truncate mb-0.5">
+                      {acc.name} ({acc.accountNumberMasked})
+                    </div>
+                    <div className="text-sm font-bold text-white tabular-nums">
+                      {isCard ? (
+                        <span className="text-rose-400">
+                          R$ {Math.abs(acc.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      ) : (
+                        <span className="text-emerald-400">
+                          R$ {acc.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-2 pt-2 border-t border-slate-700/40 flex items-center justify-between text-[10px] text-slate-400">
+                    <span>{isCard ? 'Fatura em aberto' : 'Saldo atual'}</span>
+                    <span className="text-emerald-400/90 font-medium">Sincronizado</span>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* 4. Gráficos Principais: Fluxo de Caixa Diário + Donut de Categorias */}

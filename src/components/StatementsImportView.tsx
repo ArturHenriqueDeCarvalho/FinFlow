@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFinance } from '../context/FinanceContext';
+import { useAuth } from '../context/AuthContext';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { parseOFX, parseCSV, parseStatementText } from '../utils/parsers';
 import { classifyTransactionWithRules, detectDuplicate } from '../utils/reconciliation';
-import { Category, ImportPreviewItem, Transaction } from '../types/finance';
+import { BankAccount, Category, ImportPreviewItem, Transaction } from '../types/finance';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -25,12 +28,19 @@ export const StatementsImportView: React.FC = () => {
     importHistory,
     setActiveTab,
   } = useFinance();
+  const { user } = useAuth();
 
   const [step, setStep] = useState<'UPLOAD' | 'PREVIEW' | 'REPORT'>('UPLOAD');
   const [targetAccountId, setTargetAccountId] = useState<string>(accounts[0]?.id || '');
   const [previewItems, setPreviewItems] = useState<ImportPreviewItem[]>([]);
   const [currentFileName, setCurrentFileName] = useState<string>('');
   const [currentFileType, setCurrentFileType] = useState<'OFX' | 'CSV' | 'PDF'>('OFX');
+
+  useEffect(() => {
+    if (!targetAccountId && accounts.length > 0) {
+      setTargetAccountId(accounts[0].id);
+    }
+  }, [accounts, targetAccountId]);
   const [importSummary, setImportSummary] = useState<{
     total: number;
     imported: number;
@@ -191,9 +201,45 @@ CLIENTE: FINPULSE USUARIO CONSOLIDADO
     reader.readAsText(file);
   };
 
-  const handleCommitImport = () => {
+  const handleCommitImport = async () => {
     const selected = previewItems.filter(i => i.selected);
-    const targetAcc = accounts.find(a => a.id === targetAccountId) || accounts[0];
+    let targetAcc = accounts.find(a => a.id === targetAccountId);
+
+    if (!targetAcc) {
+      if (accounts.length > 0) {
+        targetAcc = accounts[0];
+      } else {
+        // Auto-cria conta no Firestore para alocar os lançamentos do extrato importado
+        const newAccId = `acc-extrato-${Date.now().toString(36)}`;
+        const instName =
+          currentFileType === 'OFX'
+            ? 'Banco do Extrato (OFX)'
+            : currentFileType === 'CSV'
+            ? 'Conta Bancária (CSV)'
+            : 'Banco do Brasil (PDF)';
+        const newAcc: BankAccount = {
+          id: newAccId,
+          institutionId: 'inst-import',
+          institutionName: instName,
+          institutionColor: '#10B981',
+          type: 'CHECKING',
+          name: 'Conta Corrente (Extrato)',
+          accountNumberMasked: '•••• 1001',
+          balance: 0,
+          currency: 'BRL',
+          status: 'CONNECTED',
+          lastSyncAt: new Date().toISOString(),
+        };
+        if (user) {
+          try {
+            await setDoc(doc(db, 'users', user.uid, 'accounts', newAccId), newAcc);
+          } catch (e) {
+            console.error('Erro ao provisionar conta bancária:', e);
+          }
+        }
+        targetAcc = newAcc;
+      }
+    }
 
     const toImport: Array<Omit<Transaction, 'id' | 'createdAt'>> = selected.map(item => {
       const cat = categories.find(c => c.id === item.suggestedCategoryId);
@@ -216,7 +262,7 @@ CLIENTE: FINPULSE USUARIO CONSOLIDADO
       };
     });
 
-    addTransactionsFromImport(toImport, currentFileName, currentFileType);
+    await addTransactionsFromImport(toImport, currentFileName, currentFileType);
 
     setImportSummary({
       total: previewItems.length,
@@ -275,11 +321,15 @@ CLIENTE: FINPULSE USUARIO CONSOLIDADO
               onChange={e => setTargetAccountId(e.target.value)}
               className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
             >
-              {accounts.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.institutionName} - {a.name}
-                </option>
-              ))}
+              {accounts.length === 0 ? (
+                <option value="">Auto: Criar conta para o extrato</option>
+              ) : (
+                accounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.institutionName} - {a.name}
+                  </option>
+                ))
+              )}
             </select>
           </div>
         </div>

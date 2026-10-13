@@ -1,0 +1,228 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil do usuário autenticado no FinPulse via Google",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Email do usuário proveniente do Google Auth"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Nome completo do usuário"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "URL da foto de perfil do Google"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp ISO da criação da conta"
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "description": "Timestamp ISO do último acesso"
+        }
+      },
+      "required": ["email", "displayName", "createdAt"]
+    },
+    "BankAccount": {
+      "title": "BankAccount",
+      "description": "Conta bancária ou cartão real do usuário",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "institutionName": {
+          "type": "string"
+        },
+        "institutionColor": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["CHECKING", "SAVINGS", "CREDIT_CARD", "INVESTMENT"]
+        },
+        "name": {
+          "type": "string"
+        },
+        "accountNumberMasked": {
+          "type": "string"
+        },
+        "balance": {
+          "type": "number"
+        },
+        "creditLimit": {
+          "type": "number"
+        },
+        "availableCredit": {
+          "type": "number"
+        },
+        "currentInvoiceAmount": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["CONNECTED", "SYNCING", "REAUTH_REQUIRED", "DISCONNECTED"]
+        },
+        "lastSyncAt": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "institutionName", "type", "balance", "status"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Lançamento financeiro real do usuário",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "categoryId": {
+          "type": "string"
+        },
+        "categoryName": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["EXPENSE", "INCOME", "TRANSFER"]
+        },
+        "source": {
+          "type": "string"
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "isConfidenceLow": {
+          "type": "boolean"
+        },
+        "aiExplanation": {
+          "type": "string"
+        },
+        "isRecurring": {
+          "type": "boolean"
+        },
+        "isInternalTransfer": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "date", "description", "amount", "categoryId", "type", "source"]
+    },
+    "Budget": {
+      "title": "Budget",
+      "description": "Orçamento e limite financeiro por categoria",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "categoryId": {
+          "type": "string"
+        },
+        "categoryName": {
+          "type": "string"
+        },
+        "monthlyLimit": {
+          "type": "number"
+        },
+        "alertThreshold": {
+          "type": "number"
+        },
+        "spent": {
+          "type": "number"
+        },
+        "periodMonth": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "categoryId", "categoryName", "monthlyLimit", "alertThreshold"]
+    },
+    "OpenFinanceConsent": {
+      "title": "OpenFinanceConsent",
+      "description": "Registro de consentimento Open Finance do usuário",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "institutionId": {
+          "type": "string"
+        },
+        "institutionName": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "EXPIRED", "REVOKED", "REAUTH_REQUIRED"]
+        },
+        "scopes": {
+          "type": "string"
+        },
+        "durationMonths": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "lastSuccessfulSyncAt": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "institutionName", "status", "expiresAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Documento raiz do perfil do usuário autenticado"
+    },
+    "/users/{userId}/accounts/{accountId}": {
+      "schema": "BankAccount",
+      "description": "Contas e cartões bancários do usuário"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Lançamentos e movimentações financeiras do usuário"
+    },
+    "/users/{userId}/budgets/{budgetId}": {
+      "schema": "Budget",
+      "description": "Orçamentos e limites por categoria do usuário"
+    },
+    "/users/{userId}/consents/{consentId}": {
+      "schema": "OpenFinanceConsent",
+      "description": "Consentimentos Open Finance vinculados ao usuário"
+    }
+  }
+}

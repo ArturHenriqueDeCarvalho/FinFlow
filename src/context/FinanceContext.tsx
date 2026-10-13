@@ -1,5 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  orderBy,
+} from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { handleFirestoreError, OperationType } from '../lib/firestoreErrors';
+import { useAuth } from './AuthContext';
+import {
   BankAccount,
   Category,
   Transaction,
@@ -10,16 +22,7 @@ import {
   CategorizationRule,
   CashFlowProjection,
 } from '../types/finance';
-import {
-  INITIAL_ACCOUNTS,
-  DEFAULT_CATEGORIES,
-  INITIAL_TRANSACTIONS,
-  INITIAL_BUDGETS,
-  INITIAL_ALERTS,
-  INITIAL_CONSENTS,
-  INITIAL_RULES,
-  INSTITUTIONS,
-} from '../data/mockData';
+import { DEFAULT_CATEGORIES, INSTITUTIONS } from '../data/mockData';
 import { detectDuplicate } from '../utils/reconciliation';
 
 interface FinanceContextType {
@@ -34,10 +37,9 @@ interface FinanceContextType {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   isSyncingAll: boolean;
-  isDemoMode: boolean;
-  setIsDemoMode: (val: boolean) => void;
-  
-  // Filtros globais
+  isLoadingData: boolean;
+
+  // Filtros
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   filterAccountId: string;
@@ -47,27 +49,30 @@ interface FinanceContextType {
   filterPeriod: string;
   setFilterPeriod: (p: string) => void;
 
-  // Ações Open Finance
+  // Ações de persistência no Firestore
   syncAccount: (accountId: string) => Promise<void>;
   syncAllAccounts: () => Promise<void>;
-  connectInstitution: (institutionId: string, scopes: string[], durationMonths: number) => Promise<boolean>;
-  revokeConsent: (consentId: string) => void;
+  connectInstitution: (
+    institutionId: string,
+    scopes: string[],
+    durationMonths: number,
+    customAccountName?: string,
+    initialBalance?: number
+  ) => Promise<boolean>;
+  revokeConsent: (consentId: string) => Promise<void>;
 
-  // Ações de Transação & Categorização
   addTransactionsFromImport: (
     items: Array<Omit<Transaction, 'id' | 'createdAt'>>,
     fileName: string,
     fileType: 'OFX' | 'CSV' | 'PDF'
-  ) => void;
-  updateTransaction: (id: string, updates: Partial<Transaction>) => void;
-  deleteTransaction: (id: string) => void;
-  learnRule: (pattern: string, categoryId: string, categoryName: string) => void;
+  ) => Promise<void>;
+  updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<void>;
+  learnRule: (pattern: string, categoryId: string, categoryName: string) => Promise<void>;
 
-  // Ações de Orçamentos
-  updateBudget: (id: string, limit: number, threshold: number) => void;
-  addBudget: (categoryId: string, limit: number, threshold: number) => void;
+  updateBudget: (id: string, limit: number, threshold: number) => Promise<void>;
+  addBudget: (categoryId: string, limit: number, threshold: number) => Promise<void>;
 
-  // Ações de Alertas
   markAlertRead: (id: string) => void;
   dismissAlert: (id: string) => void;
 
@@ -88,61 +93,28 @@ interface FinanceContextType {
   }>;
   unreadAlertsCount: number;
 
-  // LGPD & Gestão de Dados
   exportLgpdData: () => void;
-  resetToDefaults: () => void;
-  deleteAllUserData: () => void;
+  deleteAllUserData: () => Promise<void>;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'finpulse_app_state_v1';
-
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Inicialização com dados do localStorage ou defaults
-  const [accounts, setAccounts] = useState<BankAccount[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_accounts`);
-    return saved ? JSON.parse(saved) : INITIAL_ACCOUNTS;
-  });
+  const { user } = useAuth();
 
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_transactions`);
-    return saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
-  });
-
-  const [categories, setCategories] = useState<Category[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_categories`);
-    return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
-  });
-
-  const [budgets, setBudgets] = useState<Budget[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_budgets`);
-    return saved ? JSON.parse(saved) : INITIAL_BUDGETS;
-  });
-
-  const [alerts, setAlerts] = useState<AlertNotification[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_alerts`);
-    return saved ? JSON.parse(saved) : INITIAL_ALERTS;
-  });
-
-  const [consents, setConsents] = useState<OpenFinanceConsent[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_consents`);
-    return saved ? JSON.parse(saved) : INITIAL_CONSENTS;
-  });
-
-  const [importHistory, setImportHistory] = useState<ImportHistory[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_importHistory`);
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [userRules, setUserRules] = useState<CategorizationRule[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_rules`);
-    return saved ? JSON.parse(saved) : INITIAL_RULES;
-  });
+  // Estados com inicialização 100% LIMPA (zero dados mockados)
+  const [accounts, setAccounts] = useState<BankAccount[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [categories] = useState<Category[]>(DEFAULT_CATEGORIES);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [consents, setConsents] = useState<OpenFinanceConsent[]>([]);
+  const [userRules, setUserRules] = useState<CategorizationRule[]>([]);
+  const [importHistory, setImportHistory] = useState<ImportHistory[]>([]);
+  const [alerts, setAlerts] = useState<AlertNotification[]>([]);
 
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
-  const [isDemoMode, setIsDemoMode] = useState<boolean>(true);
+  const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
 
   // Filtros
   const [searchQuery, setSearchQuery] = useState('');
@@ -150,38 +122,92 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [filterCategoryId, setFilterCategoryId] = useState('ALL');
   const [filterPeriod, setFilterPeriod] = useState('THIS_MONTH');
 
-  // Persistência automática
+  // Sincronização em tempo real via Firestore (onSnapshot) por UID do usuário
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_accounts`, JSON.stringify(accounts));
-  }, [accounts]);
+    if (!user) {
+      setAccounts([]);
+      setTransactions([]);
+      setBudgets([]);
+      setConsents([]);
+      setUserRules([]);
+      setImportHistory([]);
+      setIsLoadingData(false);
+      return;
+    }
 
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_transactions`, JSON.stringify(transactions));
-  }, [transactions]);
+    setIsLoadingData(true);
+    const userId = user.uid;
 
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_budgets`, JSON.stringify(budgets));
-  }, [budgets]);
+    // 1. Contas bancárias
+    const accountsPath = `users/${userId}/accounts`;
+    const unsubAccounts = onSnapshot(
+      collection(db, accountsPath),
+      snapshot => {
+        const accs = snapshot.docs.map(doc => doc.data() as BankAccount);
+        setAccounts(accs);
+      },
+      error => handleFirestoreError(error, OperationType.GET, accountsPath)
+    );
 
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_alerts`, JSON.stringify(alerts));
-  }, [alerts]);
+    // 2. Transações reais
+    const txsPath = `users/${userId}/transactions`;
+    const unsubTxs = onSnapshot(
+      collection(db, txsPath),
+      snapshot => {
+        const txs = snapshot.docs.map(doc => doc.data() as Transaction);
+        // Ordena por data decrescente
+        txs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setTransactions(txs);
+      },
+      error => handleFirestoreError(error, OperationType.GET, txsPath)
+    );
 
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_consents`, JSON.stringify(consents));
-  }, [consents]);
+    // 3. Orçamentos
+    const budgetsPath = `users/${userId}/budgets`;
+    const unsubBudgets = onSnapshot(
+      collection(db, budgetsPath),
+      snapshot => {
+        const bgs = snapshot.docs.map(doc => doc.data() as Budget);
+        setBudgets(bgs);
+      },
+      error => handleFirestoreError(error, OperationType.GET, budgetsPath)
+    );
 
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_importHistory`, JSON.stringify(importHistory));
-  }, [importHistory]);
+    // 4. Consentimentos Open Finance
+    const consentsPath = `users/${userId}/consents`;
+    const unsubConsents = onSnapshot(
+      collection(db, consentsPath),
+      snapshot => {
+        const csts = snapshot.docs.map(doc => doc.data() as OpenFinanceConsent);
+        setConsents(csts);
+      },
+      error => handleFirestoreError(error, OperationType.GET, consentsPath)
+    );
 
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_rules`, JSON.stringify(userRules));
-  }, [userRules]);
+    // 5. Regras de aprendizado
+    const rulesPath = `users/${userId}/rules`;
+    const unsubRules = onSnapshot(
+      collection(db, rulesPath),
+      snapshot => {
+        const rls = snapshot.docs.map(doc => doc.data() as CategorizationRule);
+        setUserRules(rls);
+        setIsLoadingData(false);
+      },
+      error => handleFirestoreError(error, OperationType.GET, rulesPath)
+    );
 
-  // Recalcula orçamentos com base nas despesas reais do mês corrente
+    return () => {
+      unsubAccounts();
+      unsubTxs();
+      unsubBudgets();
+      unsubConsents();
+      unsubRules();
+    };
+  }, [user]);
+
+  // Recalcula limites e alertas dinâmicos baseados nas transações reais
   useEffect(() => {
-    const currentMonth = new Date().toISOString().slice(0, 7); // Ex: '2026-10'
+    const currentMonth = new Date().toISOString().slice(0, 7);
     const spentByCategory: Record<string, number> = {};
 
     transactions.forEach(tx => {
@@ -190,15 +216,44 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     });
 
-    setBudgets(prevBudgets =>
-      prevBudgets.map(b => {
-        const actualSpent = spentByCategory[b.categoryId] || 0;
-        return { ...b, spent: actualSpent };
-      })
-    );
-  }, [transactions]);
+    // Gera alertas preventivos inteligentes com base em dados reais
+    const dynamicAlerts: AlertNotification[] = [];
 
-  // Total de saldos líquidos em contas e investimentos
+    budgets.forEach(b => {
+      const spent = spentByCategory[b.categoryId] || 0;
+      const pct = b.monthlyLimit > 0 ? (spent / b.monthlyLimit) * 100 : 0;
+
+      if (pct >= 100) {
+        dynamicAlerts.push({
+          id: `alt-over-${b.id}`,
+          type: 'BUDGET_OVERRUN',
+          severity: 'HIGH',
+          title: `Teto Ultrapassado: ${b.categoryName}`,
+          message: `Você gastou R$ ${spent.toFixed(2)} e ultrapassou o teto planejado de R$ ${b.monthlyLimit.toFixed(2)}.`,
+          createdAt: new Date().toISOString(),
+          isRead: false,
+          isDismissed: false,
+          relatedCategoryId: b.categoryId,
+        });
+      } else if (pct >= b.alertThreshold * 100) {
+        dynamicAlerts.push({
+          id: `alt-warn-${b.id}`,
+          type: 'BUDGET_WARNING',
+          severity: 'HIGH',
+          title: `Atenção ao Orçamento: ${b.categoryName}`,
+          message: `Você atingiu ${pct.toFixed(0)}% do teto planejado para este mês.`,
+          createdAt: new Date().toISOString(),
+          isRead: false,
+          isDismissed: false,
+          relatedCategoryId: b.categoryId,
+        });
+      }
+    });
+
+    setAlerts(dynamicAlerts);
+  }, [transactions, budgets]);
+
+  // Métricas Consolidadas Calculadas sobre Dados Reais
   const totalLiquidBalance = useMemo(() => {
     return accounts.reduce((acc, a) => {
       if (a.type !== 'CREDIT_CARD') {
@@ -208,7 +263,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }, 0);
   }, [accounts]);
 
-  // Total de faturas em aberto
   const totalCreditDebt = useMemo(() => {
     return accounts.reduce((acc, a) => {
       if (a.type === 'CREDIT_CARD') {
@@ -218,7 +272,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }, 0);
   }, [accounts]);
 
-  // Receitas e Despesas do mês corrente (excluindo transferências internas entre contas próprias)
   const { monthlyIncome, monthlyExpenses } = useMemo(() => {
     const currentMonth = new Date().toISOString().slice(0, 7);
     let inc = 0;
@@ -241,7 +294,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const monthlySavings = monthlyIncome - monthlyExpenses;
   const savingsRate = monthlyIncome > 0 ? (monthlySavings / monthlyIncome) * 100 : 0;
 
-  // Gastos por categoria no mês atual
   const categorySpending = useMemo(() => {
     const currentMonth = new Date().toISOString().slice(0, 7);
     const categoryTotals: Record<string, number> = {};
@@ -269,7 +321,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .sort((a, b) => b.total - a.total);
   }, [transactions, categories]);
 
-  // Projeção Preventiva de Fluxo de Caixa até o Fim do Mês
   const projection: CashFlowProjection = useMemo(() => {
     const now = new Date();
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -279,9 +330,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const dailyBurnRate = currentDay > 0 ? monthlyExpenses / currentDay : 0;
     const projectedAdditionalExpenses = dailyBurnRate * daysRemaining;
 
-    // Faturas de cartão com vencimento até o fim do mês
     const scheduledPayables = accounts.reduce((acc, a) => {
-      return a.type === 'CREDIT_CARD' ? acc + (a.currentInvoiceAmount || 0) : acc;
+      return a.type === 'CREDIT_CARD' ? acc + (a.currentInvoiceAmount || Math.abs(a.balance)) : acc;
     }, 0);
 
     const projectedClosingBalance = totalLiquidBalance - scheduledPayables - (projectedAdditionalExpenses * 0.5);
@@ -291,13 +341,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (projectedClosingBalance < 0) {
       riskStatus = 'DEFICIT_RISK';
-      recs.push('Risco de saldo insuficiente no fechamento do mês. Reduza compras não essenciais no cartão.');
+      recs.push('Risco de saldo insuficiente até o fim do mês com base no ritmo atual de gastos.');
     } else if (projectedClosingBalance < totalLiquidBalance * 0.25) {
       riskStatus = 'MODERATE';
-      recs.push('Saldo projetado apertado. Atenção aos vencimentos de faturas nos próximos dias.');
+      recs.push('Saldo projetado apertado. Monitore faturas com vencimento próximo.');
     } else {
       riskStatus = 'COMFORTABLE';
-      recs.push('Ritmo financeiro sob controle. Potencial para aportar R$ ' + Math.round(monthlySavings * 0.4) + ' em investimentos.');
+      recs.push('Fluxo sob controle com base nos dados sincronizados.');
     }
 
     return {
@@ -310,57 +360,56 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       riskStatus,
       recommendations: recs,
     };
-  }, [totalLiquidBalance, monthlyExpenses, monthlySavings, accounts]);
+  }, [totalLiquidBalance, monthlyExpenses, accounts]);
 
   const unreadAlertsCount = useMemo(() => {
     return alerts.filter(a => !a.isRead && !a.isDismissed).length;
   }, [alerts]);
 
-  // Sincronização individual de instituição bancária
+  // Sincronização de Conta no Firestore
   const syncAccount = async (accountId: string) => {
-    setAccounts(prev =>
-      prev.map(a => (a.id === accountId ? { ...a, status: 'SYNCING' } : a))
-    );
+    if (!user) return;
+    const accRef = doc(db, 'users', user.uid, 'accounts', accountId);
 
-    // Simula tempo de rede e validação mTLS do Open Finance Brasil
-    await new Promise(res => setTimeout(res, 1200));
-
-    setAccounts(prev =>
-      prev.map(a =>
-        a.id === accountId
-          ? {
-              ...a,
-              status: 'CONNECTED',
-              lastSyncAt: new Date().toISOString(),
-            }
-          : a
-      )
-    );
+    try {
+      await setDoc(accRef, { status: 'SYNCING' }, { merge: true });
+      await new Promise(res => setTimeout(res, 1000));
+      await setDoc(
+        accRef,
+        {
+          status: 'CONNECTED',
+          lastSyncAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/accounts/${accountId}`);
+    }
   };
 
-  // Sincronização em lote de todas as contas conectadas
   const syncAllAccounts = async () => {
+    if (!user || accounts.length === 0) return;
     setIsSyncingAll(true);
-    setAccounts(prev => prev.map(a => ({ ...a, status: 'SYNCING' })));
 
-    await new Promise(res => setTimeout(res, 1800));
-
-    setAccounts(prev =>
-      prev.map(a => ({
-        ...a,
-        status: 'CONNECTED',
-        lastSyncAt: new Date().toISOString(),
-      }))
-    );
-    setIsSyncingAll(false);
+    try {
+      for (const a of accounts) {
+        await syncAccount(a.id);
+      }
+    } finally {
+      setIsSyncingAll(false);
+    }
   };
 
-  // Conexão e Consentimento via Open Finance Brasil
+  // Conectar Nova Instituição Real no Firestore
   const connectInstitution = async (
     institutionId: string,
     scopes: string[],
-    durationMonths: number
+    durationMonths: number,
+    customAccountName?: string,
+    initialBalance: number = 0
   ): Promise<boolean> => {
+    if (!user) return false;
+
     const inst = INSTITUTIONS.find(i => i.id === institutionId);
     if (!inst) return false;
 
@@ -378,75 +427,81 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       createdAt: new Date().toISOString(),
       expiresAt: expiresDate.toISOString(),
       lastSuccessfulSyncAt: new Date().toISOString(),
-      dataShared: ['Saldos de contas', 'Transações correntes', 'Limites e faturas de cartão'],
+      dataShared: ['Saldos de contas', 'Transações correntes', 'Limites de crédito'],
     };
 
-    // Cria conta vinculada à instituição conectada
+    const newAccountId = `acc-${inst.id.replace('inst-', '')}-${Date.now().toString(36)}`;
     const newAccount: BankAccount = {
-      id: `acc-${inst.id.replace('inst-', '')}-${Date.now().toString(36)}`,
+      id: newAccountId,
       institutionId: inst.id,
       institutionName: inst.name,
       institutionColor: inst.color,
       type: 'CHECKING',
-      name: `Conta ${inst.name}`,
+      name: customAccountName || `Conta ${inst.name}`,
       accountNumberMasked: `•••• ${Math.floor(1000 + Math.random() * 9000)}`,
-      balance: Math.round(1500 + Math.random() * 6000),
+      balance: initialBalance,
       currency: 'BRL',
       status: 'CONNECTED',
       lastSyncAt: new Date().toISOString(),
       consentId,
     };
 
-    setConsents(prev => [newConsent, ...prev]);
-    setAccounts(prev => [...prev, newAccount]);
-
-    return true;
+    try {
+      await setDoc(doc(db, 'users', user.uid, 'consents', consentId), newConsent);
+      await setDoc(doc(db, 'users', user.uid, 'accounts', newAccountId), newAccount);
+      return true;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}/accounts`);
+      return false;
+    }
   };
 
-  // Revogação imediata de consentimento Open Finance (LGPD)
-  const revokeConsent = (consentId: string) => {
-    setConsents(prev =>
-      prev.map(c => (c.id === consentId ? { ...c, status: 'REVOKED' } : c))
-    );
-    // Atualiza status das contas vinculadas para desconectado
-    setAccounts(prev =>
-      prev.map(a =>
-        a.consentId === consentId
-          ? { ...a, status: 'DISCONNECTED', errorReason: 'Consentimento revogado pelo usuário.' }
-          : a
-      )
-    );
+  const revokeConsent = async (consentId: string) => {
+    if (!user) return;
+    try {
+      await setDoc(
+        doc(db, 'users', user.uid, 'consents', consentId),
+        { status: 'REVOKED' },
+        { merge: true }
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/consents/${consentId}`);
+    }
   };
 
-  // Adição de transações oriundas da importação com histórico
-  const addTransactionsFromImport = (
+  // Importar Transações Reais (OFX / CSV / PDF) diretamente no Firestore
+  const addTransactionsFromImport = async (
     newItems: Array<Omit<Transaction, 'id' | 'createdAt'>>,
     fileName: string,
     fileType: 'OFX' | 'CSV' | 'PDF'
   ) => {
+    if (!user) return;
+
     const now = new Date().toISOString();
     let dupCount = 0;
     let lowConfCount = 0;
 
-    const toInsert: Transaction[] = [];
-
-    newItems.forEach((item, index) => {
-      // Checa duplicidade
+    for (let index = 0; index < newItems.length; index++) {
+      const item = newItems[index];
       const dup = detectDuplicate(item, transactions);
+
       if (dup.isDuplicate) {
         dupCount++;
       } else {
         if (item.isConfidenceLow) lowConfCount++;
-        toInsert.push({
+        const txId = `tx-imp-${Date.now()}-${index}`;
+        const newTx: Transaction = {
           ...item,
-          id: `tx-imp-${Date.now()}-${index}`,
+          id: txId,
           createdAt: now,
-        });
-      }
-    });
+        };
 
-    if (toInsert.length > 0) {
-      setTransactions(prev => [...toInsert, ...prev]);
+        try {
+          await setDoc(doc(db, 'users', user.uid, 'transactions', txId), newTx);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}/transactions/${txId}`);
+        }
+      }
     }
 
     const historyItem: ImportHistory = {
@@ -455,7 +510,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       fileType,
       institutionName: newItems[0]?.institutionName || 'Instituição',
       totalTransactions: newItems.length,
-      importedCount: toInsert.length,
+      importedCount: newItems.length - dupCount,
       duplicateCount: dupCount,
       lowConfidenceCount: lowConfCount,
       timestamp: now,
@@ -465,62 +520,68 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setImportHistory(prev => [historyItem, ...prev]);
   };
 
-  const updateTransaction = (id: string, updates: Partial<Transaction>) => {
-    setTransactions(prev =>
-      prev.map(t => (t.id === id ? { ...t, ...updates, updatedAt: new Date().toISOString() } : t))
-    );
+  const updateTransaction = async (id: string, updates: Partial<Transaction>) => {
+    if (!user) return;
+    try {
+      await setDoc(
+        doc(db, 'users', user.uid, 'transactions', id),
+        { ...updates, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/transactions/${id}`);
+    }
   };
 
-  const deleteTransaction = (id: string) => {
-    setTransactions(prev => prev.filter(t => t.id !== id));
+  const deleteTransaction = async (id: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/transactions/${id}`);
+    }
   };
 
-  // Aprendizado de regra pelo usuário
-  const learnRule = (pattern: string, categoryId: string, categoryName: string) => {
-    const cleanPattern = pattern.trim().toUpperCase();
-    if (!cleanPattern) return;
-
+  const learnRule = async (pattern: string, categoryId: string, categoryName: string) => {
+    if (!user) return;
+    const ruleId = `rule-${Date.now()}`;
     const newRule: CategorizationRule = {
-      id: `rule-${Date.now()}`,
-      pattern: cleanPattern,
+      id: ruleId,
+      pattern: pattern.trim().toUpperCase(),
       categoryId,
       categoryName,
       createdAt: new Date().toISOString(),
       matchCount: 1,
     };
 
-    setUserRules(prev => [newRule, ...prev]);
-
-    // Aplica a regra a transações existentes com a mesma descrição
-    setTransactions(prev =>
-      prev.map(t => {
-        if (t.description.toUpperCase().includes(cleanPattern)) {
-          return {
-            ...t,
-            categoryId,
-            categoryName,
-            confidence: 100,
-            isConfidenceLow: false,
-            aiExplanation: `Regra personalizada aprendida: "${cleanPattern}".`,
-          };
-        }
-        return t;
-      })
-    );
+    try {
+      await setDoc(doc(db, 'users', user.uid, 'rules', ruleId), newRule);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}/rules/${ruleId}`);
+    }
   };
 
-  const updateBudget = (id: string, limit: number, threshold: number) => {
-    setBudgets(prev =>
-      prev.map(b => (b.id === id ? { ...b, monthlyLimit: limit, alertThreshold: threshold } : b))
-    );
+  const updateBudget = async (id: string, limit: number, threshold: number) => {
+    if (!user) return;
+    try {
+      await setDoc(
+        doc(db, 'users', user.uid, 'budgets', id),
+        { monthlyLimit: limit, alertThreshold: threshold },
+        { merge: true }
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/budgets/${id}`);
+    }
   };
 
-  const addBudget = (categoryId: string, limit: number, threshold: number) => {
+  const addBudget = async (categoryId: string, limit: number, threshold: number) => {
+    if (!user) return;
     const cat = categories.find(c => c.id === categoryId);
     if (!cat) return;
 
+    const budgetId = `b-${Date.now()}`;
     const newBudget: Budget = {
-      id: `b-${Date.now()}`,
+      id: budgetId,
       categoryId,
       categoryName: cat.name,
       monthlyLimit: limit,
@@ -529,7 +590,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       periodMonth: new Date().toISOString().slice(0, 7),
     };
 
-    setBudgets(prev => [...prev, newBudget]);
+    try {
+      await setDoc(doc(db, 'users', user.uid, 'budgets', budgetId), newBudget);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}/budgets/${budgetId}`);
+    }
   };
 
   const markAlertRead = (id: string) => {
@@ -540,59 +605,57 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setAlerts(prev => prev.map(a => (a.id === id ? { ...a, isDismissed: true } : a)));
   };
 
-  // Exportação LGPD de dados do usuário
   const exportLgpdData = () => {
+    if (!user) return;
     const data = {
-      version: '1.0',
-      exportDate: new Date().toISOString(),
-      plataforma: 'FinPulse Open Finance & IA',
-      perfil: {
-        totalContasConectadas: accounts.length,
-        totalTransacoes: transactions.length,
-        consentimentosRegistrados: consents.length,
+      versao: '1.0',
+      exportadoEm: new Date().toISOString(),
+      usuario: {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
       },
       contas: accounts,
       transacoes: transactions,
       orcamentos: budgets,
       consentimentos: consents,
-      regrasCategorizacao: userRules,
-      historicoImportacoes: importHistory,
+      regras: userRules,
     };
 
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `finpulse_lgpd_export_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `finpulse_meus_dados_reais_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  // Resetar para dados de demonstração
-  const resetToDefaults = () => {
-    setAccounts(INITIAL_ACCOUNTS);
-    setTransactions(INITIAL_TRANSACTIONS);
-    setCategories(DEFAULT_CATEGORIES);
-    setBudgets(INITIAL_BUDGETS);
-    setAlerts(INITIAL_ALERTS);
-    setConsents(INITIAL_CONSENTS);
-    setUserRules(INITIAL_RULES);
-    setImportHistory([]);
-    localStorage.clear();
-  };
-
-  // Exclusão definitiva de todos os dados (Direito ao esquecimento LGPD)
-  const deleteAllUserData = () => {
-    setAccounts([]);
-    setTransactions([]);
-    setBudgets([]);
-    setAlerts([]);
-    setConsents([]);
-    setUserRules([]);
-    setImportHistory([]);
-    localStorage.clear();
+  // Exclusão definitiva de todos os dados do usuário no Firestore (LGPD)
+  const deleteAllUserData = async () => {
+    if (!user) return;
+    try {
+      for (const a of accounts) {
+        await deleteDoc(doc(db, 'users', user.uid, 'accounts', a.id));
+      }
+      for (const t of transactions) {
+        await deleteDoc(doc(db, 'users', user.uid, 'transactions', t.id));
+      }
+      for (const b of budgets) {
+        await deleteDoc(doc(db, 'users', user.uid, 'budgets', b.id));
+      }
+      for (const c of consents) {
+        await deleteDoc(doc(db, 'users', user.uid, 'consents', c.id));
+      }
+      for (const r of userRules) {
+        await deleteDoc(doc(db, 'users', user.uid, 'rules', r.id));
+      }
+      await deleteDoc(doc(db, 'users', user.uid));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}`);
+    }
   };
 
   return (
@@ -609,8 +672,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         activeTab,
         setActiveTab,
         isSyncingAll,
-        isDemoMode,
-        setIsDemoMode,
+        isLoadingData,
         searchQuery,
         setSearchQuery,
         filterAccountId,
@@ -641,7 +703,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         categorySpending,
         unreadAlertsCount,
         exportLgpdData,
-        resetToDefaults,
         deleteAllUserData,
       }}
     >
