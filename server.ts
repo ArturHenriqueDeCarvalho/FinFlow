@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from '@google/genai';
-import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
@@ -265,10 +264,13 @@ ${rawText.slice(0, 15000)}
   }
 });
 
-// Inicialização do servidor com Vite Middleware em desenvolvimento
+// Exporta app para compatibilidade com Vercel Serverless Functions
+export default app;
+
+// Inicialização do servidor com Vite Middleware em desenvolvimento ou arquivo estático em produção
 async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production';
-  const port = 3000;
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   if (isProduction) {
     app.use(express.static(path.join(__dirname, 'dist')));
@@ -276,6 +278,7 @@ async function startServer() {
       res.sendFile(path.join(__dirname, 'dist', 'index.html'));
     });
   } else {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -288,7 +291,10 @@ async function startServer() {
   });
 }
 
-startServer().catch(err => {
-  console.error('Falha ao iniciar servidor:', err);
-  process.exit(1);
-});
+// Inicia servidor apenas fora do ambiente serverless da Vercel
+if (process.env.VERCEL !== '1') {
+  startServer().catch(err => {
+    console.error('Falha ao iniciar servidor:', err);
+    process.exit(1);
+  });
+}
