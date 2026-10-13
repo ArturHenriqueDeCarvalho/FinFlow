@@ -135,6 +135,25 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return;
     }
 
+    if (user.isAnonymous) {
+      // Sessão de demonstração / convidado local
+      try {
+        const saved = localStorage.getItem(`finpulse_guest_data_${user.uid}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.accounts) setAccounts(parsed.accounts);
+          if (parsed.transactions) setTransactions(parsed.transactions);
+          if (parsed.budgets) setBudgets(parsed.budgets);
+          if (parsed.consents) setConsents(parsed.consents);
+          if (parsed.rules) setUserRules(parsed.rules);
+        }
+      } catch (e) {
+        console.error('Erro ao recuperar dados locais do convidado:', e);
+      }
+      setIsLoadingData(false);
+      return;
+    }
+
     setIsLoadingData(true);
     const userId = user.uid;
 
@@ -446,6 +465,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       consentId,
     };
 
+    if (user.isAnonymous) {
+      setConsents(prev => [newConsent, ...prev]);
+      setAccounts(prev => [newAccount, ...prev]);
+      return true;
+    }
+
     try {
       await setDoc(doc(db, 'users', user.uid, 'consents', consentId), newConsent);
       await setDoc(doc(db, 'users', user.uid, 'accounts', newAccountId), newAccount);
@@ -458,6 +483,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const revokeConsent = async (consentId: string) => {
     if (!user) return;
+    if (user.isAnonymous) {
+      setConsents(prev =>
+        prev.map(c => (c.id === consentId ? { ...c, status: 'REVOKED' } : c))
+      );
+      return;
+    }
     try {
       await setDoc(
         doc(db, 'users', user.uid, 'consents', consentId),
@@ -480,6 +511,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const now = new Date().toISOString();
     let dupCount = 0;
     let lowConfCount = 0;
+    const addedTxs: Transaction[] = [];
 
     for (let index = 0; index < newItems.length; index++) {
       const item = newItems[index];
@@ -495,13 +527,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           id: txId,
           createdAt: now,
         };
+        addedTxs.push(newTx);
 
-        try {
-          await setDoc(doc(db, 'users', user.uid, 'transactions', txId), newTx);
-        } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}/transactions/${txId}`);
+        if (!user.isAnonymous) {
+          try {
+            await setDoc(doc(db, 'users', user.uid, 'transactions', txId), newTx);
+          } catch (err) {
+            handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}/transactions/${txId}`);
+          }
         }
       }
+    }
+
+    if (user.isAnonymous) {
+      setTransactions(prev => [...addedTxs, ...prev]);
     }
 
     const historyItem: ImportHistory = {
@@ -522,6 +561,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const updateTransaction = async (id: string, updates: Partial<Transaction>) => {
     if (!user) return;
+    if (user.isAnonymous) {
+      setTransactions(prev => prev.map(t => (t.id === id ? { ...t, ...updates } : t)));
+      return;
+    }
     try {
       await setDoc(
         doc(db, 'users', user.uid, 'transactions', id),
@@ -535,6 +578,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const deleteTransaction = async (id: string) => {
     if (!user) return;
+    if (user.isAnonymous) {
+      setTransactions(prev => prev.filter(t => t.id !== id));
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
     } catch (err) {
@@ -554,6 +601,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       matchCount: 1,
     };
 
+    if (user.isAnonymous) {
+      setUserRules(prev => [newRule, ...prev]);
+      return;
+    }
+
     try {
       await setDoc(doc(db, 'users', user.uid, 'rules', ruleId), newRule);
     } catch (err) {
@@ -563,6 +615,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const updateBudget = async (id: string, limit: number, threshold: number) => {
     if (!user) return;
+    if (user.isAnonymous) {
+      setBudgets(prev =>
+        prev.map(b => (b.id === id ? { ...b, monthlyLimit: limit, alertThreshold: threshold } : b))
+      );
+      return;
+    }
     try {
       await setDoc(
         doc(db, 'users', user.uid, 'budgets', id),
@@ -589,6 +647,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       spent: 0,
       periodMonth: new Date().toISOString().slice(0, 7),
     };
+
+    if (user.isAnonymous) {
+      setBudgets(prev => [...prev.filter(b => b.id !== budgetId), newBudget]);
+      return;
+    }
 
     try {
       await setDoc(doc(db, 'users', user.uid, 'budgets', budgetId), newBudget);
@@ -636,6 +699,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Exclusão definitiva de todos os dados do usuário no Firestore (LGPD)
   const deleteAllUserData = async () => {
     if (!user) return;
+
+    if (user.isAnonymous) {
+      setAccounts([]);
+      setTransactions([]);
+      setBudgets([]);
+      setConsents([]);
+      setUserRules([]);
+      setImportHistory([]);
+      localStorage.removeItem(`finpulse_guest_data_${user.uid}`);
+      return;
+    }
+
     try {
       for (const a of accounts) {
         await deleteDoc(doc(db, 'users', user.uid, 'accounts', a.id));
